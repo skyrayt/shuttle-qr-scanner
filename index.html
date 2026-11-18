@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
@@ -23,7 +23,7 @@
       50% { top: 82%; }
     }
     /* 非 8 碼警示：紅框閃爍＋覆蓋相機畫面 */
-    .cam-error { border-color: #ef4444 !important; animation: camShake .35s ease-in-out 2; }
+    .cam-error { border-color: #f59e0b !important; animation: camShake .3s ease-in-out 1; }
     @keyframes camShake {
       0%, 100% { transform: translateX(0); }
       25% { transform: translateX(-8px); }
@@ -73,12 +73,12 @@
     <div id="camBox" class="relative w-full max-w-sm bg-black rounded-2xl overflow-hidden border-4 border-slate-700 shadow-2xl min-h-[280px] flex items-center justify-center">
       <div id="reader" class="w-full"></div>
       <div id="scanLine" class="scan-line hidden"></div>
-      <!-- 非 8 碼警示（覆蓋相機畫面，約 2.5 秒後自動消失，相機持續掃描） -->
-      <div id="errorOverlay" class="hidden absolute inset-0 z-30 bg-red-700/90 flex flex-col items-center justify-center text-center px-5">
-        <div class="text-6xl leading-none">❌</div>
-        <div class="text-2xl font-extrabold text-white mt-3">不是 8 碼四眾編號</div>
-        <div class="text-base text-red-100 mt-2 break-all">讀到：<span id="errorRaw" class="font-bold text-white"></span></div>
-        <div class="text-base font-bold text-yellow-200 mt-3">請改對準四眾編號 QR Code</div>
+      <!-- 非 8 碼警示（半透明覆蓋相機畫面，約 1 秒後自動消失，相機持續掃描） -->
+      <div id="errorOverlay" class="hidden absolute inset-0 z-30 bg-slate-900/70 flex flex-col items-center justify-center text-center px-5">
+        <div class="text-5xl leading-none">⚠️</div>
+        <div class="text-2xl font-extrabold text-amber-300 mt-3">不是 8 碼四眾編號</div>
+        <div class="text-base text-slate-200 mt-2 break-all">讀到：<span id="errorRaw" class="font-bold text-white"></span></div>
+        <div class="text-base font-bold text-white mt-3">請改對準四眾編號 QR Code</div>
       </div>
     </div>
 
@@ -199,11 +199,11 @@
       playBuzz();
     }
     const statusBanner = document.getElementById('statusBanner');
-    statusBanner.className = 'w-full max-w-sm bg-red-700 border-2 border-red-300 text-white px-3 py-3 rounded-xl text-base font-extrabold mb-3 text-center shadow-lg';
-    statusBanner.textContent = '❌ 掃到的不是 8 碼四眾編號，請重新對準';
+    statusBanner.className = 'w-full max-w-sm bg-amber-500 border-2 border-amber-300 text-slate-950 px-3 py-3 rounded-xl text-base font-extrabold mb-3 text-center shadow-lg';
+    statusBanner.textContent = '⚠️ 掃到的不是 8 碼四眾編號，請重新對準';
 
     clearTimeout(wrongTimer);
-    wrongTimer = setTimeout(hideWrongCode, 2500);
+    wrongTimer = setTimeout(hideWrongCode, 1000);
   }
 
   function hideWrongCode() {
