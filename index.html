@@ -22,6 +22,13 @@
       0%, 100% { top: 18%; }
       50% { top: 82%; }
     }
+    /* 非 8 碼警示：紅框閃爍＋覆蓋相機畫面 */
+    .cam-error { border-color: #ef4444 !important; animation: camShake .35s ease-in-out 2; }
+    @keyframes camShake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-8px); }
+      75% { transform: translateX(8px); }
+    }
   </style>
 </head>
 <body class="min-h-screen flex flex-col justify-between select-none">
@@ -55,10 +62,24 @@
       </button>
     </div>
 
+    <!-- 相機權限提示（重複詢問相機時才顯示） -->
+    <div id="permTip" class="hidden w-full max-w-sm bg-amber-100 text-amber-950 border-2 border-amber-400 px-4 py-3 rounded-xl mb-3 text-sm shadow">
+      <div class="font-extrabold mb-1">💡 不想每次都被問「是否允許相機」？</div>
+      <div id="permTipBody" class="leading-relaxed"></div>
+      <button type="button" onclick="dismissPermTip()" class="mt-2 w-full bg-amber-500 hover:bg-amber-600 text-amber-950 font-bold py-2 rounded-lg text-sm">知道了，不再顯示</button>
+    </div>
+
     <!-- 相機預覽容器 -->
-    <div class="relative w-full max-w-sm bg-black rounded-2xl overflow-hidden border-2 border-slate-700 shadow-2xl min-h-[280px] flex items-center justify-center">
+    <div id="camBox" class="relative w-full max-w-sm bg-black rounded-2xl overflow-hidden border-4 border-slate-700 shadow-2xl min-h-[280px] flex items-center justify-center">
       <div id="reader" class="w-full"></div>
       <div id="scanLine" class="scan-line hidden"></div>
+      <!-- 非 8 碼警示（覆蓋相機畫面，約 2.5 秒後自動消失，相機持續掃描） -->
+      <div id="errorOverlay" class="hidden absolute inset-0 z-30 bg-red-700/90 flex flex-col items-center justify-center text-center px-5">
+        <div class="text-6xl leading-none">❌</div>
+        <div class="text-2xl font-extrabold text-white mt-3">不是 8 碼四眾編號</div>
+        <div class="text-base text-red-100 mt-2 break-all">讀到：<span id="errorRaw" class="font-bold text-white"></span></div>
+        <div class="text-base font-bold text-yellow-200 mt-3">請改對準四眾編號 QR Code</div>
+      </div>
     </div>
 
     <!-- 輔助與備援操作按鈕 -->
@@ -134,6 +155,118 @@
     } catch (e) {}
   }
 
+  /** 錯誤提示音：低音、較長，與成功音明顯不同 */
+  function playBuzz() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      [0, 0.22].forEach((t) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(220, ctx.currentTime + t);
+        gain.gain.setValueAtTime(0.12, ctx.currentTime + t);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(ctx.currentTime + t);
+        osc.stop(ctx.currentTime + t + 0.16);
+      });
+    } catch (e) {}
+  }
+
+  // ---------- 非 8 碼警示 ----------
+  let wrongTimer = null;
+  let lastWrongRaw = '';
+  let lastWrongAt = 0;
+
+  function showWrongCode(rawText) {
+    const raw = String(rawText || '').trim();
+    const now = Date.now();
+    // 同一個錯誤條碼持續在鏡頭前：只延長顯示，不重複震動／發聲
+    const repeated = raw === lastWrongRaw && now - lastWrongAt < 3000;
+    lastWrongRaw = raw;
+    lastWrongAt = now;
+
+    document.getElementById('errorRaw').textContent = raw.length > 30 ? raw.substring(0, 30) + '…' : (raw || '（空白）');
+    document.getElementById('errorOverlay').classList.remove('hidden');
+    const box = document.getElementById('camBox');
+    if (!repeated) {
+      box.classList.remove('cam-error');
+      void box.offsetWidth; // 重新觸發動畫
+      box.classList.add('cam-error');
+      if (navigator.vibrate) { try { navigator.vibrate([200, 100, 200]); } catch (e) {} }
+      playBuzz();
+    }
+    const statusBanner = document.getElementById('statusBanner');
+    statusBanner.className = 'w-full max-w-sm bg-red-700 border-2 border-red-300 text-white px-3 py-3 rounded-xl text-base font-extrabold mb-3 text-center shadow-lg';
+    statusBanner.textContent = '❌ 掃到的不是 8 碼四眾編號，請重新對準';
+
+    clearTimeout(wrongTimer);
+    wrongTimer = setTimeout(hideWrongCode, 2500);
+  }
+
+  function hideWrongCode() {
+    clearTimeout(wrongTimer);
+    document.getElementById('errorOverlay').classList.add('hidden');
+    document.getElementById('camBox').classList.remove('cam-error');
+    if (isScanning && !isHandlingResult) setScanningBanner();
+  }
+
+  function setScanningBanner() {
+    const statusBanner = document.getElementById('statusBanner');
+    statusBanner.className = 'w-full max-w-sm bg-emerald-950/80 border border-emerald-600 text-emerald-200 px-3 py-2.5 rounded-xl text-sm font-bold mb-3 text-center shadow';
+    statusBanner.textContent = '📷 相機運作中，請對準 8 碼四眾編號 QR Code';
+  }
+
+  // ---------- 相機權限重複詢問提示 ----------
+  // 瀏覽器是否每次都詢問相機，由瀏覽器／手機設定決定，網頁無法代為「永久允許」；
+  // 這裡只偵測「之前允許過、這次又被問」的情況，顯示對應的設定方式。
+  const LS_GRANTED = 'qrScanner.cameraGrantedOnce';
+  const LS_TIP_OFF = 'qrScanner.permTipDismissed';
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+  async function getCameraPermissionState() {
+    try {
+      if (navigator.permissions && navigator.permissions.query) {
+        const st = await navigator.permissions.query({ name: 'camera' });
+        return st.state; // granted / prompt / denied
+      }
+    } catch (e) {}
+    return 'unknown';
+  }
+
+  function permTipHtml() {
+    const ua = navigator.userAgent || '';
+    if (/\bLine\//i.test(ua)) {
+      return '您正在使用 <b>LINE 內建瀏覽器</b>，它每次都會詢問相機。<br>請在報到頁右上角「⋯」選「<b>用預設瀏覽器開啟</b>」，之後改用 Safari／Chrome 開啟報到頁。';
+    }
+    if (/iPhone|iPad|iPod/i.test(ua)) {
+      return '<b>iPhone（Safari）</b>：在本頁網址列左邊點「<b>大小</b>」（aA 圖示）→「<b>網站設定</b>」→「<b>相機</b>」→ 選「<b>允許</b>」。<br>或：手機「設定」→「App」→「Safari」→「相機」→「允許」。';
+    }
+    if (/Android/i.test(ua)) {
+      return '<b>Android（Chrome）</b>：跳出詢問時請選「<b>造訪這個網站時允許</b>」，不要選「僅允許這一次」。<br>已選錯的話：點網址列左邊圖示 →「權限」→「相機」→ 開啟。';
+    }
+    return '請在瀏覽器的網站設定中，將本網站的「相機」設為「允許」。';
+  }
+
+  function maybeShowPermTip(stateBefore, elapsedMs) {
+    const grantedBefore = lsGet(LS_GRANTED) === '1';
+    lsSet(LS_GRANTED, '1');
+    if (!grantedBefore || lsGet(LS_TIP_OFF) === '1') return;
+    // 之前允許過，這次權限狀態又是「詢問」；無法查詢狀態時，以啟動相機花費時間判斷（有跳詢問通常 > 1.5 秒）
+    const askedAgain = stateBefore === 'prompt' || (stateBefore === 'unknown' && elapsedMs > 1500);
+    if (!askedAgain) return;
+    document.getElementById('permTipBody').innerHTML = permTipHtml();
+    document.getElementById('permTip').classList.remove('hidden');
+  }
+
+  function dismissPermTip() {
+    lsSet(LS_TIP_OFF, '1');
+    document.getElementById('permTip').classList.add('hidden');
+  }
+
   function extractEightDigitId(rawText) {
     const trimmed = String(rawText || '').trim();
     if (!trimmed) return null;
@@ -148,11 +281,11 @@
     const statusBanner = document.getElementById('statusBanner');
 
     if (!code8) {
-      statusBanner.className = 'w-full max-w-sm bg-amber-900/80 border border-amber-500 text-amber-200 px-3 py-2.5 rounded-xl text-xs font-bold mb-3 text-center shadow';
-      statusBanner.textContent = `⚠️ 讀取內容「${String(rawText).substring(0, 20)}」非 8 碼數字，請對準四眾編號條碼`;
+      showWrongCode(rawText);
       return;
     }
 
+    hideWrongCode();
     isHandlingResult = true;
     lastScannedCode = code8;
 
@@ -341,10 +474,12 @@
     img.src = url;
   }
 
-  function startScanner() {
+  async function startScanner() {
     if (isScanning) return;
     isHandlingResult = false;
     const statusBanner = document.getElementById('statusBanner');
+    const permStateBefore = await getCameraPermissionState();
+    const startedAt = Date.now();
 
     try {
       if (!html5QrCode) {
@@ -373,8 +508,8 @@
       () => {}
     ).then(() => {
       isScanning = true;
-      statusBanner.className = 'w-full max-w-sm bg-emerald-950/80 border border-emerald-600 text-emerald-200 px-3 py-2.5 rounded-xl text-sm font-bold mb-3 text-center shadow';
-      statusBanner.textContent = '📷 相機運作中，請對準 8 碼四眾編號 QR Code';
+      setScanningBanner();
+      maybeShowPermTip(permStateBefore, Date.now() - startedAt);
       document.getElementById('scanLine').classList.remove('hidden');
       document.getElementById('captureFrameBtn').classList.remove('hidden');
       startAssistLoop();
